@@ -1,0 +1,12 @@
+{
+  "name": "facefinder-chain",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Persistent local EVM (ganache) for the facefinder pipeline's rpc backend",
+  "dependencies": {
+    "ganache": "^7.9.2"
+  },
+  "scripts": {
+    "node": "ganache --server.host 127.0.0.1 --server.port 8545 --chain.chainId 1337 --database.dbPath ./chaindata --logging.quiet"
+  }
+}

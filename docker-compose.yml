@@ -1,0 +1,36 @@
+name: facefinder
+
+# Persistent local EVM (ganache, chain id 1337) + the pipeline container.
+#
+# The chain uses the well-known throwaway dev mnemonic
+#   "test test test test test test test test test test test junk"
+# whose first account is 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266
+# (key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80).
+# DEV ONLY - never use these keys with real funds.
+services:
+  chain:
+    image: trufflesuite/ganache:latest
+    command: >
+      --server.host 0.0.0.0
+      --chain.chainId 1337
+      --database.dbPath /data
+      --wallet.mnemonic "test test test test test test test test test test test junk"
+      --logging.quiet
+    ports:
+      - "8545:8545"
+    volumes:
+      - ganache-data:/data
+
+  facefinder:
+    build: .
+    depends_on:
+      - chain
+    environment:
+      RPC_URL: http://chain:8545
+      PRIVATE_KEY: 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
+      CHAIN_ID: 1337
+    volumes:
+      - ./records:/app/records
+
+volumes:
+  ganache-data:

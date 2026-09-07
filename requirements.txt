@@ -1,0 +1,19 @@
+# Core pipeline
+numpy>=1.24,<2
+opencv-python>=4.9
+insightface==1.0.1
+onnxruntime>=1.17
+
+# Web / search
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5            # optional faster HTML parsing
+
+# Blockchain (EVM)
+web3>=7.0
+eth-tester>=0.11
+py-evm>=0.8
+py-solc-x>=2.0
+
+# Config
+python-dotenv>=1.0

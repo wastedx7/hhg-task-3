@@ -1,0 +1,13 @@
+.venv/
+node_modules/
+chaindata/
+records/
+__pycache__/
+*.pyc
+.git/
+.insightface/
+*.log
+.env
+Dockerfile
+docker-compose.yml
+.dockerignore
