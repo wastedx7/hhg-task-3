@@ -1,10 +1,10 @@
 {
   "schema_version": "1.0.0",
   "fingerprint_algorithm": "keccak256(canonical-json)",
-  "fingerprint": "0x9f42058528a3c458c1f4cc3dbdb937fa1649b4e35abcf3c2e8dfa943a51851fe",
+  "fingerprint": "0x5f5846c69af4a80389fdba7b4d6ff10cf0461ddbd0329bd22c26869e25693074",
   "content": {
     "pipeline_version": "1.0.0",
-    "created_at": "2026-09-07T15:57:13.550041+05:30",
+    "created_at": "2026-09-07T21:02:58.336602+05:30",
     "source_image": {
       "file": "obama.jpg",
       "sha256": "744dd848fbb0584229169e01c4944664957c62495fb9e8af514a088ebca43e19",
@@ -29,7 +29,7 @@
     },
     "reverse_search": {
       "engine": "yandex",
-      "query_image_url": "https://h.uguu.se/WQwqLYbm.jpg",
+      "query_image_url": "https://d.uguu.se/rnuTuhlE.jpg",
       "candidate_count": 20,
       "top_candidates": [
         {
@@ -69,7 +69,7 @@
       "url": "https://www.youtube.com/shorts/o144x9fTln0",
       "title": "pol/ - Politically Incorrect \\\" Thread #382269776 \\\" This corrupt nigger is running things behind the scenes",
       "engine": "yandex",
-      "query_image_url": "https://h.uguu.se/WQwqLYbm.jpg",
+      "query_image_url": "https://d.uguu.se/rnuTuhlE.jpg",
       "rank": 97.0,
       "face_similarity": 0.9639,
       "face_verified": true,
@@ -102,13 +102,13 @@
     }
   },
   "chain": {
-    "backend": "rpc",
+    "backend": "local",
     "chain_id": 1337,
-    "contract_address": "0xaa91e63e70C5913B934aC20f558E302B8fa7A242",
+    "contract_address": "0xF2E246BB76DF876Cef8b38ae84130F4F55De395b",
     "record_id": 0,
-    "tx_hash": "a9eba0ed04d154a4220043365991769f67cf3d96689c2e0278a1dde55e572051",
+    "tx_hash": "9464878d7b2d6062a9b2ff2e0eae7be49a45b615384a9e9454d7500bea2f3541",
     "block_number": 2,
-    "rpc_url": "http://127.0.0.1:8545",
-    "network_name": "custom-rpc"
+    "rpc_url": null,
+    "network_name": "local-in-process-evm"
   }
 }
