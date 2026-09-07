@@ -11,43 +11,148 @@ photo ──► face detect + encode (512-d embedding)
         ──► reverse-image search (Yandex) → candidate social posts
         ──► face-verify each candidate (embedding similarity)
         ──► fetch post metadata → build canonical record → keccak256 fingerprint
-        ──►Notary smart contract on an EVM chain (local / ganache / testnet)
+        ──► Notary smart contract on an EVM chain (local / ganache / testnet)
         ──► re-verify on-chain, write records/record-*.json
 ```
 
 No website is included on purpose — everything is the pipeline itself.
 
-## What each stage does
+## Requirements checklist (what this repo delivers)
 
-1. **Face identification** (`facefinder/face.py`)
-   InsightFace (`buffalo_l`: SCRFD detector + ArcFace `w600k_r50`) detects the
-   largest face, and produces a 512-dimensional biometric encoding
-   (L2-normalised float32, also stored as hex). The face crop (with margin) is
-   what gets searched.
-2. **Reverse-image search** (`facefinder/searcher.py`)
-   The crop is pushed to an anonymous image host (uguu.se, catbox.moe fallback)
-   so the image is URL-addressable, then queried against the Yandex Images
-   engine by URL. This is a **real search performed at run time** — scratch the
-   `records/*.json` files, every URL, title and engine rank inside them was
-   fetched live. Candidates from social platforms (X/Twitter, Instagram,
-   TikTok, YouTube, Reddit, …) are ranked by platform desirability + the
-   engine's own result order.
-3. **Match validation** — the top candidates are probed in order: the post page
-   is fetched (OpenGraph metadata), its `og:image` is downloaded, a face is
-   detected in it, and its embedding is compared to the input face by cosine
-   similarity. The first candidate above `--face-threshold` (default 0.40) is
-   accepted as the match; the similarity and every probe are stored in the
-   record under `content.match`.
-4. **Blockchain record** (`contracts/Notary.sol` via `facefinder/chain.py`)
-   The canonical record (source-image hash, face embedding, engine, candidates,
-   match, post metadata) is fingerprinted with **keccak256** and stored in the
-   `Notary` smart contract together with the post URL:
-   `record(source, url, fingerprint) → record_id`. The on-chain tuple is then
-   read back and compared — `on-chain verification: fingerprint match = True`.
-5. **Verify any time** (`facefinder verify`) — recompute the fingerprint from a
-   saved record file and (when the chain is reachable) read the on-chain
-   record and compare. Any modification of the file, or of the chain entry,
-   shows up as a mismatch.
+| Requirement | Where it lives |
+|---|---|
+| Detect and encode a face from an input image | `facefinder/face.py` — InsightFace `buffalo_l` (SCRFD detector + ArcFace `w600k_r50`), 512-d embedding |
+| Genuine reverse-image search, real matching social post, no hardcoding | `facefinder/searcher.py` — live Yandex Images by-URL queries at run time; every URL/title/rank in `records/` was fetched live |
+| Upload the match to a blockchain, tamper-evident + verifiable | `contracts/Notary.sol` + `facefinder/chain.py` — keccak256 fingerprint stored on-chain, read back and compared |
+| No website | None built — CLI only (`facefinder/cli.py`) |
+| README with functionality, run instructions, blockchain, limitations | This file |
+| Unedited end-to-end screen recording | Record `run` + `verify` as described in “What success looks like” below |
+
+## Prerequisites
+
+| Need | Version / note | Why |
+|---|---|---|
+| Python | **3.11** recommended (best wheel coverage for the ML stack) | InsightFace + onnxruntime + py-evm |
+| `uv` or `pip` | any recent version (`uv` is much faster) | installing `requirements.txt` |
+| Internet access | required at **run time**, not just install | live reverse-image search + anonymous image hosting |
+| Disk space | ~500 MB free (native) / ~3 GB (Docker image) | face models ~300 MB, solc binary, deps |
+| Node.js + npm | only for the persistent-local-chain path | `ganache` EVM node |
+| Docker Desktop | only for the container path | `Dockerfile` / `docker-compose.yml` |
+
+Check yours first:
+
+```powershell
+python --version   # want 3.11.x (3.10–3.12 also work; 3.13+ lose some wheels)
+node --version     # only needed for ganache
+docker --version   # only needed for containers
+```
+
+## Setup (Windows PowerShell)
+
+```powershell
+cd C:\path\to\hhg-task-3
+
+# 1. create the environment (uv is fastest, plain pip works too)
+uv venv --python 3.11 .venv
+uv pip install --python .venv/Scripts/python.exe -r requirements.txt
+# …or without uv:
+# py -3.11 -m venv .venv
+# .venv\Scripts\python -m pip install -r requirements.txt
+
+# 2. confirm the CLI loads
+.venv\Scripts\python -m facefinder run --help
+```
+
+On the first real run, the InsightFace models (~300 MB, auto-downloaded from
+GitHub) and the solc 0.8.24 compiler (auto-downloaded) are fetched. Subsequent
+runs reuse them — models live in `~/.insightface`, the compiler in `~/.solcx`.
+
+## Run the pipeline
+
+```powershell
+# Full pipeline on the sample photo. Default chain backend is `local`
+# (in-process EVM, zero setup). Takes ~2–4 minutes, mostly the live search.
+.venv\Scripts\python -m facefinder run --input samples\obama.jpg
+```
+
+### What success looks like
+
+You should see each stage report in order (values vary run to run — the search
+is live, so candidates/URLs change):
+
+```
+==> reading samples\obama.jpg
+==> detected 1 face(s); using largest (score=0.903)
+    bbox=(1002, 223, 1633, 1150) | embedding dim=512 norm=19.771
+    face crop: 1135x1520px, 355320 bytes
+==> hosting face crop on an anonymous image host
+  [host] uguu: https://….uguu.se/….jpg
+==> reverse-image search (engine=yandex) for face crop
+    engine returned ~260 candidate items
+    23 are social-platform candidates:
+      [ 97.0 social] youtube.com  https://www.youtube.com/shorts/…
+      …
+    probe [youtube.com] HTTP 200 face-sim=0.964 -> ACCEPT: https://…
+==> selected match: [youtube.com] https://www.youtube.com/shorts/…
+    face verification: PASS (sim=0.964)
+==> fingerprint = 0x…
+==> connecting chain backend=local
+    Notary deployed at 0x… (chain_id=1337)
+    record #0 tx=0x… block=2
+==> on-chain verification: fingerprint match = True
+==> record written to records\record-20260907T….json
+    fingerprint: 0x…
+    tamper check (file digest vs fingerprint): PASS
+```
+
+Two artifacts prove the run: the console transcript above and
+`records/record-<timestamp>.json` (full record: source-image hash, face
+embedding, engine candidates, match + probes, post metadata, chain receipt).
+
+### Run on your own photo
+
+```powershell
+.venv\Scripts\python -m facefinder run --input C:\photos\someone.jpg --out records
+```
+
+Use a clear, front-facing, well-lit photo. Public figures match best — reverse
+engines can only find what is already posted publicly, so a private photo of
+an unknown person will very likely end with `error: reverse-image search found
+no social-media post` (exit code 3). That is the search telling the truth, not
+a bug.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | full pipeline succeeded, record written and verified |
+| `2` | usage/input problem — e.g. `error: no face detected in the input image` |
+| `3` | genuine search completed but found no social-media post |
+| `4` | verification failed — fingerprint mismatch (tampered record or chain entry) |
+
+## Verify a record (and prove tamper-evidence)
+
+```powershell
+# re-verify a saved record: recomputes the fingerprint from the file and,
+# when the chain is reachable, compares it with the on-chain entry
+.venv\Scripts\python -m facefinder verify --record records\<name>.json
+# expect: matches stored fingerprint? YES  (+ fingerprint match: YES for rpc records)
+```
+
+Tamper demo — exact commands, no manual editing needed (the pattern below
+targets the sample run's match URL; for any other record just change any single
+character inside its `content` object — the effect is identical):
+
+```powershell
+Copy-Item records\<name>.json records\tampered.json
+(Get-Content records\tampered.json -Raw) -replace 'youtube\.com/shorts/o144x9fTln0','evil.example/post' | Set-Content records\tampered.json
+.venv\Scripts\python -m facefinder verify --record records\tampered.json
+# expect: matches stored fingerprint? NO - RECORD WAS MODIFIED   (exit code 4)
+Remove-Item records\tampered.json
+```
+
+Any single changed byte anywhere in `content` produces a different keccak256,
+so the modified file can never match the stored/on-chain fingerprint again.
 
 ## Blockchain used
 
@@ -56,68 +161,102 @@ Any EVM-compatible chain, via two backends:
 | backend | chain | durability |
 |---|---|---|
 | `local` (default) | in-process Ethereum EVM (`eth-tester` + `py-evm`), chain id 1337 | lives only for the run; on-chain verification happens in-process right after recording |
-| `rpc` | any JSON-RPC endpoint — persistent local node (`npm run node`, ganache) or a public testnet (e.g. Base Sepolia, Polygon Amoy) | records persist; `verify` re-checks the chain in a later process |
+| `rpc` | any JSON-RPC endpoint — persistent local node (ganache, below) or a public testnet (e.g. Base Sepolia, Polygon Amoy) | records persist; `verify` re-checks the chain in a later process, even after restarts |
 
-A `Notary` contract is compiled with solc 0.8.24 and deployed fresh per run.
-Public-testnet usage just needs `RPC_URL` + a funded `PRIVATE_KEY`
-(see `.env.example`).
+The `Notary` contract (`contracts/Notary.sol`, compiled with solc 0.8.24,
+deployed fresh per run) exposes `record(source, url, fingerprint) → id` and
+`get(id) → (fingerprint, source, url, timestamp)`. Each run prints the contract
+address, transaction hash and block number; `records/*.json` stores them under
+`chain` so anyone can re-verify later.
 
-## Quick start (Windows PowerShell)
-
-Python 3.11 is recommended (best wheel coverage for the ML stack).
-
-```powershell
-# 1. environment (uv is fastest, plain pip works too)
-uv venv --python 3.11 .venv
-uv pip install --python .venv/Scripts/python.exe -r requirements.txt
-# or: .venv\Scripts\python -m pip install -r requirements.txt
-
-# 2. run the whole pipeline on the sample photo (default: local chain)
-.venv\Scripts\python -m facefinder run --input samples\obama.jpg
-```
-
-On first run the InsightFace models (~300 MB) and the solc 0.8.24 compiler are
-downloaded automatically. Expect the run to take 1–4 minutes (face models load
-once, then search + metadata fetches + chain deploy).
-
-Outputs:
-
-- a console transcript of every stage (faces, engine candidates, probes with
-  `face-sim`, fingerprint, contract address, tx hash, block number),
-- `records/record-<timestamp>.json` — the full tamper-evident record.
-
-Re-verify a saved record later:
+### Persistent local chain (ganache)
 
 ```powershell
-.venv\Scripts\python -m facefinder verify --record records\<name>.json
-```
+npm install   # installs ganache (see package.json)
 
-Tamper demo — change one byte of a record file and re-verify: the recomputed
-fingerprint no longer matches the stored/on-chain one.
-
-```powershell
-# copy a record, edit content.match.url inside, then verify
-.venv\Scripts\python -m facefinder verify --record records\record-TAMPERED.json
-# => matches stored fingerprint? NO - RECORD WAS MODIFIED
-```
-
-## Persistent local chain (ganache)
-
-```powershell
-npm install            # installs ganache (see package.json)
-npm run node           # persistent EVM at http://127.0.0.1:8545, data in ./chaindata
-
-# generate a key, start the node with it funded, then run the rpc backend:
+# generate a throwaway key and start a funded, persistent node with it:
 .venv\Scripts\python -c "from eth_account import Account; a=Account.create(); print(a.key.hex())"
 node node_modules/ganache/dist/node/cli.js --server.host 127.0.0.1 --server.port 8545 `
   --chain.chainId 1337 --database.dbPath ./chaindata --wallet.accounts "0x<KEY>,1000000000000000000000"
+
+# run the rpc backend against it (separate terminal):
 .venv\Scripts\python -m facefinder run --input samples\obama.jpg --chain rpc `
   --rpc-url http://127.0.0.1:8545 --private-key 0x<KEY> --chain-id 1337
-.venv\Scripts\python -m facefinder verify --record records\<new>.json   # works after restarts
+
+# later — even after stopping/restarting the node — re-verify:
+.venv\Scripts\python -m facefinder verify --record records\<new>.json
+# expect: file integrity YES + on-chain fingerprint match YES
 ```
 
-Public testnet instead: copy `.env.example` to `.env`, set `FACEFINDER_CHAIN=rpc`,
-`RPC_URL`, `CHAIN_ID` and a funded `PRIVATE_KEY`, then run with `--chain rpc`.
+### Public testnet
+
+```powershell
+Copy-Item .env.example .env
+# edit .env: FACEFINDER_CHAIN=rpc, RPC_URL, CHAIN_ID, and a *funded* PRIVATE_KEY
+# e.g. Base Sepolia: RPC_URL=https://sepolia.base.org  CHAIN_ID=84532
+.venv\Scripts\python -m facefinder run --input samples\obama.jpg --chain rpc
+.venv\Scripts\python -m facefinder verify --record records\<new>.json
+```
+
+Never commit a real private key — `.env` is git-ignored.
+
+## Docker
+
+The repo ships a `Dockerfile` (pipeline image, ~2.8 GB — face models and solc
+are pre-fetched at build time) and `docker-compose.yml` (pipeline + a
+persistent ganache EVM with its data in the `ganache-data` volume; the compose
+file uses a documented throwaway dev key — dev only).
+
+```powershell
+# build once (takes a while: pip deps + ~300MB of face models)
+docker build -t facefinder:latest .
+
+# 1) self-contained run: in-process chain, record lands in ./records
+docker run --rm -v "${PWD}/records:/app/records" facefinder:latest run --input samples/obama.jpg
+
+# 2) verify a record (file integrity; local-chain note for `local` records)
+docker run --rm -v "${PWD}/records:/app/records" facefinder:latest verify --record records/<name>.json
+
+# 3) tamper demo: edit a copy, verify flags it
+Copy-Item records/<name>.json records/tampered.json
+# ... change content.match.url inside tampered.json ...
+docker run --rm -v "${PWD}/records:/app/records" facefinder:latest verify --record records/tampered.json
+# => matches stored fingerprint? NO - RECORD WAS MODIFIED
+
+# 4) persistent chain + rpc backend (durable on-chain records)
+docker compose up -d chain
+docker compose run --rm facefinder run --input samples/obama.jpg --chain rpc
+docker compose run --rm facefinder verify --record records/<new>.json
+# => file integrity YES + on-chain fingerprint match YES
+docker compose down   # chain data persists in the ganache-data volume
+```
+
+How to test, in order: `run --help` → full `run` (expect `face verification:
+PASS` and `on-chain verification: fingerprint match = True`) → `verify` on
+the produced record (expect `YES`) → tampered copy (expect `NO - RECORD WAS
+MODIFIED`) → compose `chain` + rpc `run` + cross-container `verify` (expect
+`YES`/`YES`). The pipeline needs internet from inside the containers for the
+live reverse-image search; if your network blocks container egress, the search
+step will fail while everything else still works.
+
+## Useful options
+
+```
+facefinder run --input photo.jpg [--out records]
+  --chain local|rpc            chain backend (default: local)
+  --rpc-url / --private-key / --chain-id   for rpc backend
+  --image-url URL              skip anonymous hosting, search this URL directly
+  --engine yandex               reverse-image engine
+  --margin 0.4                  margin around the face crop
+  --probe 8                     top-N social candidates to validate
+  --face-threshold 0.40         min cosine similarity to accept the match
+  --search-timeout 60
+
+facefinder verify --record records/x.json [--rpc-url …] [--contract …] [--record-id N]
+```
+
+Set `FACEFINDER_FACE_MODEL` to a different InsightFace pack (e.g. `antelopev2`)
+if you want a lighter download.
 
 ## The sample photo
 
@@ -158,62 +297,18 @@ records show this exact outcome.
 }
 ```
 
-## Useful options
+## Troubleshooting
 
-```
-facefinder run --input photo.jpg [--out records]
-  --chain local|rpc            chain backend (default: local)
-  --rpc-url / --private-key / --chain-id   for rpc backend
-  --image-url URL              skip anonymous hosting, search this URL directly
-  --engine yandex               reverse-image engine
-  --margin 0.4                  margin around the face crop
-  --probe 8                     top-N social candidates to validate
-  --face-threshold 0.40         min cosine similarity to accept the match
-  --search-timeout 60
-
-facefinder verify --record records/x.json [--rpc-url …] [--contract …] [--record-id N]
-```
-
-Set `FACEFINDER_FACE_MODEL` to a different InsightFace pack (e.g. `antelopev2`)
-if you want a lighter download.
-
-## Docker
-
-The repo ships a `Dockerfile` (pipeline image, ~2.8 GB — face models and solc
-are pre-fetched at build time) and `docker-compose.yml` (pipeline + a
-persistent ganache EVM with its data in the `ganache-data` volume).
-
-```powershell
-# build once (takes a while: pip deps + ~300MB of face models)
-docker build -t facefinder:latest .
-
-# 1) self-contained run: in-process chain, record lands in ./records
-docker run --rm -v "${PWD}/records:/app/records" facefinder:latest run --input samples/obama.jpg
-
-# 2) verify a record (file integrity; local-chain note for `local` records)
-docker run --rm -v "${PWD}/records:/app/records" facefinder:latest verify --record records/<name>.json
-
-# 3) tamper demo: edit a copy, verify flags it
-Copy-Item records/<name>.json records/tampered.json
-# ... change content.match.url inside tampered.json ...
-docker run --rm -v "${PWD}/records:/app/records" facefinder:latest verify --record records/tampered.json
-# => matches stored fingerprint? NO - RECORD WAS MODIFIED
-
-# 4) persistent chain + rpc backend (durable on-chain records)
-docker compose up -d chain
-docker compose run --rm facefinder run --input samples/obama.jpg --chain rpc
-docker compose run --rm facefinder verify --record records/<new>.json
-# => file integrity YES + on-chain fingerprint match YES
-docker compose down   # chain data persists in the ganache-data volume
-```
-
-How to test, in order: `run --help` → full `run` (expect `face verification:
-PASS` and `on-chain verification: fingerprint match = True`) → `verify` on
-the produced record (expect `YES`) → tampered copy (expect `NO - RECORD WAS
-MODIFIED`) → compose `chain` + rpc `run` + cross-container `verify` (expect
-`YES`/`YES`). The pipeline needs internet from inside the containers for the
-live reverse-image search; if your network blocks container egress, the search
-step will fail while everything else still works.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| `error: no face detected` (exit 2) | no clear frontal face in the input | use a front-facing, well-lit photo |
+| `…found no social-media post` (exit 3) | nobody publicly posted this face | expected for private/unknown people; try a public figure |
+| Search step hangs then errors | Yandex rate-limiting or blocking your network | wait and retry; try another network |
+| `cannot reach JSON-RPC …` | `rpc` backend but no node running | start ganache / check `RPC_URL` (the CLI retries ~60 s, then gives up) |
+| `Unexpected private key length` | malformed `PRIVATE_KEY` | must be 64 hex chars (`0x…`); generate a fresh one as shown above |
+| First run is very slow | one-time downloads (models ~300 MB, solc, pip packages) | wait it out; later runs reuse everything |
+| `docker build` fails on `py-solc-x` | stale `requirements.txt` pin | ensure the line reads `py-solc-x>=2.0` (2.0.5 is latest) |
+| Container search fails but native works | container has no internet egress | allow Docker through the firewall/VPN, then retry |
 
 ## Known limitations
 
@@ -251,6 +346,7 @@ facefinder/        pipeline package (face, hosting, searcher, postmeta, record, 
 contracts/Notary.sol   on-chain notary
 samples/           demo input photo
 records/           tamper-evident record JSONs produced by runs
+Dockerfile / docker-compose.yml / .dockerignore   container setup
 package.json       local EVM helper (ganache)
 requirements.txt   python dependencies
 .env.example       chain/search configuration template
